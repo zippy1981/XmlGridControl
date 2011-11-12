@@ -15,18 +15,16 @@
 //  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 using System;
-using System.Collections.Generic;
-using System.Text;
+using System.IO;
 using System.Windows.Forms;
 using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Drawing.Drawing2D;
-using System.Diagnostics;
-using System.Drawing.Text;
+using System.Xml;
 
 namespace WmHelp.XmlGrid
 {
-    public class XmlGridView: Control
+    public sealed class XmlGridView: Control
     {
         public struct DrawInfo
         {
@@ -68,9 +66,9 @@ namespace WmHelp.XmlGrid
             }
         }
 
-        private static ImageList _images;
-        private VScrollBar _vScroll;
-        private HScrollBar _hScroll;
+        private static readonly ImageList _images;
+        private readonly VScrollBar _vScroll;
+        private readonly HScrollBar _hScroll;
 
         public int DefaultColumnWidth { get; set; }
         public bool AutoHeightCells { get; set; }
@@ -94,14 +92,94 @@ namespace WmHelp.XmlGrid
             }
         }
 
+        #region Factory Methods
+
+        /// <summary>
+        /// Creates a web form with an <c>XmlGridView</c> rendering the xml in a string.
+        /// </summary>
+        /// <param name="string">A string containing the xml document to render.</param>
+        /// <param name="width">The width of the window.</param>
+        /// <param name="height">The height of the window.</param>
+        /// <returns></returns>
+        public static Form CreateFormFromFile(string xml, int width = 300, int height = 200)
+        {
+            var xmlDoc = new XmlDocument();
+            xmlDoc.LoadXml(xml);
+            return CreateForm(xmlDoc, height, width);
+        }
+
+        /// <summary>
+        /// Creates a web form with an <c>XmlGridView</c> rendering the xml in a string.
+        /// </summary>
+        /// <param name="string">A string containing the xml document to render.</param>
+        /// <param name="width">The width of the window.</param>
+        /// <param name="height">The height of the window.</param>
+        /// <returns></returns>
+        public static Form CreateForm(string xml, int width = 300, int height = 200)
+        {
+            var xmlDoc = new XmlDocument();
+            xmlDoc.LoadXml(xml);
+            return CreateForm(xmlDoc, height, width);
+        }
+
+        /// <summary>
+        /// Creates a web form with an <c>XmlGridView</c> rendering the xml in a <see cref="Stream"/>.
+        /// </summary>
+        /// <param name="stream">A <see cref="string"/> containing the xml document to render.</param>
+        /// <param name="width">The width of the window.</param>
+        /// <param name="height">The height of the window.</param>
+        /// <returns></returns>
+        public static Form CreateForm(Stream stream, int width = 300, int height = 200)
+        {
+            var xmlDoc = new XmlDocument();
+            xmlDoc.Load(stream);
+            return CreateForm(xmlDoc, height, width);
+        }
+
+        /// <summary>
+        /// Creates a web form with an <c>XmlGridView</c> rendering an <see cref="XmlDocument"/>.
+        /// </summary>
+        /// <param name="xmlDoc">The document to render.</param>
+        /// <param name="width">The width of the window.</param>
+        /// <param name="height">The height of the window.</param>
+        /// <returns></returns>
+        public static Form CreateForm(XmlDocument xmlDoc, int width = 300, int height = 200)
+        {
+            var form = new Form
+                           {
+                               Height = height,
+                               Width = width,
+                               ClientSize = new Size(width, height)
+                           };
+            var grid = new XmlGridView { Dock = DockStyle.Fill };
+            form.Controls.Add(grid);
+
+            var builder = new GridBuilder();
+            var xmlgroup = new GridCellGroup();
+            xmlgroup.Flags = GroupFlags.Overlapped | GroupFlags.Expanded;
+            builder.ParseNodes(xmlgroup, null, xmlDoc.ChildNodes);
+            var root = new GridCellGroup();
+            root.Table.SetBounds(1, 2);
+            root.Table[0, 0] = new GridHeadLabel();
+            root.Table[0, 0].Text = "Sample Xml";
+            root.Table[0, 1] = xmlgroup;
+            grid.Cell = root;
+
+            return form;
+        }
+
+        #endregion Factory Methods
+
         #region Control
 
         static XmlGridView()
         {
-            _images = new ImageList();
-            _images.TransparentColor = Color.Fuchsia;
-            _images.ImageSize = new Size(16, 13);
-            _images.ColorDepth = ColorDepth.Depth24Bit;
+            _images = new ImageList
+                          {
+                              TransparentColor = Color.Fuchsia,
+                              ImageSize = new Size(16, 13),
+                              ColorDepth = ColorDepth.Depth24Bit
+                          };
             _images.Images.AddStrip(Properties.Resources.Images);
         }
 
@@ -116,14 +194,14 @@ namespace WmHelp.XmlGrid
                 ControlStyles.AllPaintingInWmPaint | ControlStyles.Selectable, true);
             _vScroll = new ImplicitVScrollBar();
             _vScroll.Dock = DockStyle.Right;
-            _vScroll.ValueChanged += new EventHandler(HandleScrollBar);
+            _vScroll.ValueChanged += HandleScrollBar;
             _vScroll.Width = SystemInformation.VerticalScrollBarWidth;
             _vScroll.Visible = false;
             _hScroll = new ImplicitHScrollBar();
             _hScroll.Dock = DockStyle.Bottom;
             _hScroll.Height = SystemInformation.HorizontalScrollBarHeight;
             _hScroll.Visible = false;
-            _hScroll.ValueChanged += new EventHandler(HandleScrollBar);
+            _hScroll.ValueChanged += HandleScrollBar;
             Controls.AddRange(new Control[] { _vScroll, _hScroll });
         }
 
@@ -182,7 +260,8 @@ namespace WmHelp.XmlGrid
         #endregion
 
         #region Measure Cells
-        protected int ColumnWidth(int col)
+
+        private int ColumnWidth(int col)
         {
             if (col < _columnsWidth.Length)
                 return _columnsWidth[col];
@@ -190,7 +269,7 @@ namespace WmHelp.XmlGrid
                 return 0;
         }
 
-        protected int RowHeight(int row)
+        private int RowHeight(int row)
         {
             if (row < _rowHeight.Length)
                 return _rowHeight[row];
@@ -198,7 +277,7 @@ namespace WmHelp.XmlGrid
                 return 0;
         }
 
-        protected int RangeWidth(int col, int count)
+        private int RangeWidth(int col, int count)
         {
             int res = 0;
             for (int k = col; k < col + count; k++)
@@ -206,7 +285,7 @@ namespace WmHelp.XmlGrid
             return res;
         }
 
-        protected int RangeHeight(int row, int count)
+        private int RangeHeight(int row, int count)
         {
             int res = 0;
             for (int k = row; k < row + count; k++)
@@ -214,7 +293,7 @@ namespace WmHelp.XmlGrid
             return res;
         }
 
-        protected void GetRowNumWidth(GridCellTable table, Graphics g)
+        private void GetRowNumWidth(GridCellTable table, Graphics g)
         {            
             Font font = new Font(Font, FontStyle.Bold);
             int width = (int)g.MeasureString(table.Height.ToString() + "0", font).Width + 3;
@@ -235,7 +314,7 @@ namespace WmHelp.XmlGrid
                     }
         }
 
-        protected int CountCellColumns(GridCell cell)
+        private int CountCellColumns(GridCell cell)
         {
             if (cell.IsGroup)
             {
@@ -259,7 +338,7 @@ namespace WmHelp.XmlGrid
             return 1;
         }
 
-        protected int CountCellRows(GridCell cell)
+        private int CountCellRows(GridCell cell)
         {
             if (cell.IsGroup)
             {
@@ -283,7 +362,7 @@ namespace WmHelp.XmlGrid
             return 1;
         }
 
-        protected void SetCellWidth(int column, int count, GridCellGroup cell)
+        private void SetCellWidth(int column, int count, GridCellGroup cell)
         {
             if (cell.Expanded)
             {
@@ -331,7 +410,7 @@ namespace WmHelp.XmlGrid
             }
         }
 
-        protected void SetTableRows(GridCellGroup cell)
+        private void SetTableRows(GridCellGroup cell)
         {
             if (cell.Expanded)
                 for (int s = 0; s < cell.Table.Height; s++)
@@ -347,7 +426,7 @@ namespace WmHelp.XmlGrid
                 }
         }
 
-        protected void DoAutoHeightCells(int row, int count, GridCellGroup cell, Graphics g)
+        private void DoAutoHeightCells(int row, int count, GridCellGroup cell, Graphics g)
         {
             if (cell.Expanded)
             {
@@ -375,7 +454,7 @@ namespace WmHelp.XmlGrid
             }
         }
 
-        protected void SetCellHeight(int row, int count, GridCellGroup cell)
+        private void SetCellHeight(int row, int count, GridCellGroup cell)
         {
             if (cell.Expanded)
             {
@@ -398,7 +477,7 @@ namespace WmHelp.XmlGrid
             }
         }
 
-        protected void MeasureCells()
+        private void MeasureCells()
         {
             if (_rootCell == null)
             {
@@ -443,13 +522,13 @@ namespace WmHelp.XmlGrid
             g.Dispose();            
         }
 
-        protected void UpdateWidth()
+        private void UpdateWidth()
         {
             _drawInfo.iMaxWidth = RangeWidth(0, _columnsWidth.Length);
             SetCellWidth(0, _columnsWidth.Length, _rootCell);
         }
 
-        protected void UpdateHeight(Graphics g)
+        private void UpdateHeight(Graphics g)
         {
             for (int s = 0; s < _rootCell.Table.Height; s++)
             {
@@ -806,7 +885,7 @@ namespace WmHelp.XmlGrid
                 return HitTest.Nothing;
         }
 
-        protected bool IsBorder(int X)
+        private bool IsBorder(int X)
         {
             int curr = 0;
             _columnIndex = -1;
@@ -825,7 +904,7 @@ namespace WmHelp.XmlGrid
             return false;
         }
 
-        protected bool IsBorderLine(Point p)
+        private bool IsBorderLine(Point p)
         {
             if (p.Y <= _drawInfo.nLinesCount * _drawInfo.cyChar && IsBorder(p.X))
             {
@@ -1482,11 +1561,11 @@ namespace WmHelp.XmlGrid
 
         #region Paint
 
-        protected virtual void DrawCell(Graphics g, int X, int Y, GridCell cell,
+        private void DrawCell(Graphics g, int x, int y, GridCell cell,
             int pixelWidth, int pixelHeight, bool isSelected)
         {
-            Rectangle cellRect = Rectangle.FromLTRB(X + 1, Y + 1,
-                X + pixelWidth, Y + pixelHeight);            
+            Rectangle cellRect = Rectangle.FromLTRB(x + 1, y + 1,
+                x + pixelWidth, y + pixelHeight);            
             Brush brush;
             if (cell is GridHeadLabel)
             {
@@ -1532,9 +1611,9 @@ namespace WmHelp.XmlGrid
             if (cell.ImageIndex != -1)
             {                                    
                 if (cell.ImageIndex <= 1)
-                    g.DrawImage(_images.Images[cell.ImageIndex], X + 5, Y + 3);
+                    g.DrawImage(_images.Images[cell.ImageIndex], x + 5, y + 3);
                 else
-                    g.DrawImage(_images.Images[cell.ImageIndex], X + 2, Y + 2);
+                    g.DrawImage(_images.Images[cell.ImageIndex], x + 2, y + 2);
                 cellRect.X += _images.ImageSize.Width +1;
                 cellRect.Width -= _images.ImageSize.Width + 1;
             }
@@ -1553,7 +1632,7 @@ namespace WmHelp.XmlGrid
                     cell.DrawCellText(this, g, Font, textBrush, sf, _drawInfo, cellRect);
         }
 
-        protected virtual void DrawGridTable(Graphics g, RectangleF clipRect, int X, int Y, GridCellTable table,
+        private void DrawGridTable(Graphics g, RectangleF clipRect, int X, int Y, GridCellTable table,
             int pixelWidth, int pixelHeight, bool isSelected)
         {
             Pen pen = new Pen(Color.Silver);
@@ -1605,7 +1684,7 @@ namespace WmHelp.XmlGrid
                 g.DrawLine(pen, X, top, X + pixelWidth, top);
         }
 
-        protected virtual void DrawGroupCell(Graphics g, RectangleF clipRect, int X, int Y, GridCellGroup cell,
+        private void DrawGroupCell(Graphics g, RectangleF clipRect, int X, int Y, GridCellGroup cell,
             int pixelWidth, int pixelHeight, bool isSelected)
         {
             DrawCell(g, X, Y, cell, pixelWidth, pixelHeight, isSelected);
